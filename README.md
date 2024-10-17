@@ -1,7 +1,3 @@
-Here's a README template for your Rust project that outlines the flow of the code, focusing on models, controllers, authentication, and database connection. This can serve as a guide for beginners looking to understand the structure and functionality of the application.
-
----
-
 # Rust Web Application with Authentication
 
 This project is a simple web application built using Rust and the Actix framework. It demonstrates how to implement user authentication, handle JSON data, and connect to a PostgreSQL database. The application provides endpoints for user registration and login, utilizing JSON Web Tokens (JWT) for secure authentication.
@@ -158,7 +154,3 @@ Make sure you have `jq` installed to parse JSON responses.
 ## Conclusion
 
 This project serves as a basic introduction to building a web application in Rust with user authentication and database connectivity. Feel free to explore and modify the code to enhance your understanding of Rust and web development!
-
----
-
-Feel free to modify the README as per your project's specific requirements or add any additional information that may help beginners!
