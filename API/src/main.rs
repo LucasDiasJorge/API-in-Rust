@@ -2,6 +2,9 @@ use actix_web::{web, App, HttpServer, Responder, HttpResponse, HttpRequest};
 use serde::{Deserialize, Serialize};
 use jsonwebtoken::{encode, decode, Header, Validation, EncodingKey, DecodingKey, TokenData};
 use bcrypt::{hash, verify};
+use sqlx::{PgPool, query};
+use dotenv::dotenv;
+use std::env;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 // Chave secreta para assinatura dos tokens JWT
@@ -112,18 +115,29 @@ async fn process_json(req: HttpRequest, info: web::Json<Info>) -> impl Responder
     })
 }
 
-// Manipulador para o login (gera o JWT)
-async fn login(info: web::Json<LoginData>) -> impl Responder {
-    // Usuário e senha "hardcoded" para exemplo (substituir por BD)
-    let stored_password_hash = hash("password123", 4).unwrap();  // senha hashada
+// Manipulador para o login (persiste dados e gera o JWT)
+async fn login(pool: web::Data<PgPool>, info: web::Json<LoginData>) -> impl Responder {
+    // Verifique se o usuário existe no banco
+    let user = sqlx::query!("SELECT password_hash FROM users WHERE username = $1", info.username)
+        .fetch_optional(pool.get_ref())
+        .await
+        .expect("Error fetching user");
 
-    if info.username == "user" && verify(&info.password, &stored_password_hash).unwrap() {
-        match generate_jwt(&info.username) {
-            Ok(token) => HttpResponse::Ok().json(SuccessResponse {
-                success: true,
-                message: format!("Bearer {}", token),
-            }),
-            Err(_) => HttpResponse::InternalServerError().body("Could not create token"),
+    if let Some(user) = user {
+        // Verifique a senha
+        if verify(&info.password, &user.password_hash).unwrap() {
+            match generate_jwt(&info.username) {
+                Ok(token) => HttpResponse::Ok().json(SuccessResponse {
+                    success: true,
+                    message: format!("Bearer {}", token),
+                }),
+                Err(_) => HttpResponse::InternalServerError().body("Could not create token"),
+            }
+        } else {
+            HttpResponse::Unauthorized().json(ErrorResponse {
+                success: false,
+                message: "Invalid credentials".to_string(),
+            })
         }
     } else {
         HttpResponse::Unauthorized().json(ErrorResponse {
@@ -133,11 +147,39 @@ async fn login(info: web::Json<LoginData>) -> impl Responder {
     }
 }
 
+// Função para registrar novos usuários (insere no banco)
+async fn register(pool: web::Data<PgPool>, info: web::Json<LoginData>) -> impl Responder {
+    let password_hash = hash(&info.password, 4).unwrap();
+
+    let result = sqlx::query!("INSERT INTO users (username, password_hash) VALUES ($1, $2)", info.username, password_hash)
+        .execute(pool.get_ref())
+        .await;
+
+    match result {
+        Ok(_) => HttpResponse::Ok().json(SuccessResponse {
+            success: true,
+            message: "User registered successfully".to_string(),
+        }),
+        Err(_) => HttpResponse::InternalServerError().json(ErrorResponse {
+            success: false,
+            message: "Failed to register user".to_string(),
+        }),
+    }
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    HttpServer::new(|| {
+    dotenv().ok(); // Carrega o arquivo .env
+    let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+
+    // Cria um pool de conexões com o banco de dados
+    let pool = PgPool::connect(&database_url).await.expect("Failed to create pool");
+
+    HttpServer::new(move || {
         App::new()
+            .app_data(web::Data::new(pool.clone())) // Adiciona o pool de conexões no App
             .route("/login", web::post().to(login))  // Rota para login
+            .route("/register", web::post().to(register))  // Rota para registro
             .route("/json", web::post().to(process_json))  // Rota protegida
     })
         .bind("127.0.0.1:8080")?
